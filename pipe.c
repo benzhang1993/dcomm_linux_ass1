@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 
 #define MSGSIZE 16
 
@@ -19,7 +20,10 @@ void fatal (char *);
 /*------- Message Strings -------------*/
 char *msgT = "Sent to translate";
 char *msgO = "Sent to output";
-char *msg2 = "Goodbye World";
+char *msg2 = "T";
+
+pid_t translate_pid;
+pid_t output_pid;
 
 void input(int translate_pipe[2], int echo_pipe[2]);
 void translate(int translate_pipe[2], int output_pipe[2]);
@@ -66,13 +70,13 @@ int main (void)
 
 
   /*-------- fork ---------------*/
-  switch(fork()) {
+  switch(translate_pid = fork()) {
       case -1:
         fatal("error creating translate child");
       case 0:
         translate(translatepipe, outputpipe);
       default:
-        switch(fork()) {
+        switch(output_pid = fork()) {
             case -1:
               fatal("error creating output child");
             case 0:
@@ -84,77 +88,79 @@ int main (void)
 }
 
 void input(int translate_pipe[2], int echo_pipe[2]) {
-    int count;
+    char input;
+    char buffer[100];
+    char *inputptr;
 
     close(translate_pipe[0]);    /* close the read descriptor */
     close(echo_pipe[0]);    /* close the read descriptor */
 
-    for (count = 0; count < 3; count ++)
-    {
-      write (translate_pipe[1], msgT, MSGSIZE);
-      write (echo_pipe[1], msgO, MSGSIZE);
-      sleep (3);
-    }
+    system("stty raw igncr -echo");
 
-    write (translate_pipe[1], msg2, MSGSIZE);
-    write (echo_pipe[1], msg2, MSGSIZE);
+    while(1) {
+        if((input=getchar()) != EOF) {
+            if(input == 'E') {
+                break;
+            }
+            else {
+                inputptr = &input;
+                write (echo_pipe[1], inputptr, 1);
+            }
+        }
+    }
+    //
+    // while((input=getchar())!='E') {
+    //     if(!inputptr){
+    //         inputptr = &input;
+    //         write (echo_pipe[1], inputptr, 1);
+    //     }
+    // }
+
+    system("stty -raw -igncr echo");
+    kill(translate_pid, SIGTERM);
+    kill(output_pid, SIGTERM);
     exit(0);
 }
 
 void translate(int translate_pipe[2], int output_pipe[2]) {
     int nread;
-    char buf[MSGSIZE];
+    char buf[1];
 
     close(translate_pipe[1]);    /* close the write descriptor */
     close(output_pipe[0]);    /* close the read descriptor */
 
     for (;;)
     {
-      switch (nread = read(translate_pipe[0], buf, MSGSIZE))
+      switch (nread = read(translate_pipe[0], buf, 1))
       {
-        case -1:
-        case 0:
-  	          printf ("(translate pipe empty)\n");
-  	          sleep(1);
-              break;
+        case -1: break;
+        case 0: break;
         default:
             if (strcmp (buf, msg2) == 0)
             {
           	  printf ("End of Translate\n");
           	  exit(0);
             }
-        else
-  	         printf ("MSG = %s\n", buf);
+            else{}
+
       }
     }
 }
 
 void output(int echo_pipe[2], int output_pipe[2]) {
     int nread;
-    char buf[MSGSIZE];
+    char buf[1];
 
     close(echo_pipe[1]);    /* close the write descriptor */
     close(output_pipe[1]);    /* close the write descriptor */
 
-    for (;;)
-    {
-      switch (nread = read(echo_pipe[0], buf, MSGSIZE))
-      {
-        case -1:
-        case 0:
-  	          printf ("(Output pipe empty)\n");
-  	          sleep(1);
-              break;
-        default:
-            if (strcmp (buf, msg2) == 0)
-            {
-          	  printf ("End of Output\n");
-          	  exit(0);
-            }
-        else
-  	         printf ("MSG = %s\n", buf);
-      }
-    }
+     while (1){
+         nread = read(echo_pipe[0], buf, 1);
+         if(nread == -1) {
+             // printf("read is %d", nread);
+             putchar(*buf);
+        }
+     }
 }
 
 /*---------- Error function ------*/
