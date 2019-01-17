@@ -89,8 +89,9 @@ int main (void)
 
 void input(int translate_pipe[2], int echo_pipe[2]) {
     char input;
+    char* inputptr;
     char buffer[100];
-    char *inputptr;
+    int index = -1;
 
     close(translate_pipe[0]);    /* close the read descriptor */
     close(echo_pipe[0]);    /* close the read descriptor */
@@ -99,22 +100,39 @@ void input(int translate_pipe[2], int echo_pipe[2]) {
 
     while(1) {
         if((input=getchar()) != EOF) {
-            if(input == 'E') {
+            if(input == 'T') {
+                printf("\n\r");
                 break;
             }
-            else {
-                inputptr = &input;
-                write (echo_pipe[1], inputptr, 1);
+            switch(input) {
+                case 'E':
+                    write(translate_pipe[1], buffer, sizeof(buffer));
+                    memset(buffer, 0, 100);
+                    index = -1;
+                    break;
+                case 'X':
+                    buffer[index] = '\0';
+                    index--;
+                    inputptr = &input;
+                    write (echo_pipe[1], inputptr, 1);
+                    break;
+                case 'K':
+                    memset(buffer, 0, 100);
+                    index = -1;
+                    inputptr = &input;
+                    write (echo_pipe[1], inputptr, 1);
+                    break;
+                case 11:
+                    printf("killing");
+                    kill(0,9);
+                    break;
+                default:
+                    inputptr = &input;
+                    buffer[++index] = input;
+                    write (echo_pipe[1], inputptr, 1);
             }
         }
     }
-    //
-    // while((input=getchar())!='E') {
-    //     if(!inputptr){
-    //         inputptr = &input;
-    //         write (echo_pipe[1], inputptr, 1);
-    //     }
-    // }
 
     system("stty -raw -igncr echo");
     kill(translate_pid, SIGTERM);
@@ -124,43 +142,50 @@ void input(int translate_pipe[2], int echo_pipe[2]) {
 
 void translate(int translate_pipe[2], int output_pipe[2]) {
     int nread;
-    char buf[1];
+    char buf[100];
 
     close(translate_pipe[1]);    /* close the write descriptor */
     close(output_pipe[0]);    /* close the read descriptor */
 
-    for (;;)
-    {
-      switch (nread = read(translate_pipe[0], buf, 1))
-      {
-        case -1: break;
-        case 0: break;
-        default:
-            if (strcmp (buf, msg2) == 0)
-            {
-          	  printf ("End of Translate\n");
-          	  exit(0);
+    while(1){
+        nread = read(translate_pipe[0], buf, sizeof(buf));
+        if(nread > 0) {
+            for(int i = 0; i < 100; i++) {
+                if(buf[i] == 'a') {
+                    buf[i] = 'z';
+                }
             }
-            else{}
-
-      }
+            write (output_pipe[1], buf, 100);
+        }
     }
 }
 
 void output(int echo_pipe[2], int output_pipe[2]) {
     int nread;
     char buf[1];
+    char translated[100];
+
+    // Disbales stdout buffer so when putchar is called, it is printed immedaitely,
+    // otherwise fflush would have to be used to manually flush the char
+    // setbuf(stdout, NULL);
 
     close(echo_pipe[1]);    /* close the write descriptor */
     close(output_pipe[1]);    /* close the write descriptor */
 
-     while (1){
-         nread = read(echo_pipe[0], buf, 1);
-         if(nread == -1) {
-             // printf("read is %d", nread);
-             putchar(*buf);
+    while(1){
+
+        nread = read(output_pipe[0], translated, sizeof(translated));
+        if(nread > 0) {
+            printf("\n\rTranslated: %s\n\r", translated);
+            fflush(stdout);
         }
-     }
+
+        nread = read(echo_pipe[0], buf, sizeof(buf));
+        if(nread > 0) {
+            putchar(*buf);
+            fflush(stdout);
+        }
+    }
 }
 
 /*---------- Error function ------*/
